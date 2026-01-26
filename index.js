@@ -33,12 +33,7 @@ const client = axios.create({
  * UTILITY: Resolve Relative URLs
  */
 function resolveUrl(baseUrl, relativeUrl) {
-    if (!relativeUrl) return null;
     try {
-        // Handle cases like "//cdn.site.com/logo.png"
-        if (relativeUrl.startsWith('//')) {
-            return 'https:' + relativeUrl;
-        }
         return new URL(relativeUrl, baseUrl).href;
     } catch (e) {
         return null;
@@ -311,5 +306,6 @@ function calculateHammingDistance(hash1, hash2) {
     const yamlStr = yaml.dump(groups);
     fs.writeFileSync('groups.yaml', yamlStr, 'utf8');
     console.log("Done.");
+
 
 })();
