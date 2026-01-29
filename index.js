@@ -4,9 +4,12 @@ const sharp = require('sharp');
 const https = require('https');
 const fs = require('fs');
 const yaml = require('js-yaml');
+const puppeteer = require('puppeteer');
+const Stats = require('./stats');
 
 // --- CONFIGURATION ---
-const CONCURRENCY_LIMIT = 20; 
+const stats = new Stats(true);
+const CONCURRENCY_LIMIT = 10; // Reduced slightly because Puppeteer is heavy
 const SIMILARITY_THRESHOLD = 8;
 const TIMEOUT_MS = 10000;
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
@@ -30,12 +33,12 @@ const client = axios.create({
 });
 
 /**
- * UTILITY: Resolve Relative URLs (THIS WAS MISSING)
+ * UTILITY: Resolve Relative URLs
  */
 function resolveUrl(baseUrl, relativeUrl) {
     if (!relativeUrl) return null;
     try {
-        if (relativeUrl.startsWith('data:')) return null; // Skip base64 for now to keep it simple
+        if (relativeUrl.startsWith('data:')) return null;
         if (relativeUrl.startsWith('//')) {
             return 'https:' + relativeUrl;
         }
@@ -46,9 +49,10 @@ function resolveUrl(baseUrl, relativeUrl) {
 }
 
 /**
- * STEP 1: EXTRACTOR (Tier 1 + Tier 2)
+ * METHOD 1: STATIC EXTRACTOR (Your Original Code)
+ * Fast, lightweight, used as first attempt.
  */
-async function extractLogoUrl(websiteUrl) {
+async function extractLogoUrlAxios(websiteUrl) {
     try {
         const response = await client.get(websiteUrl);
         const finalUrl = response.request?.res?.responseUrl || response.config.url;
@@ -58,7 +62,6 @@ async function extractLogoUrl(websiteUrl) {
         const $ = cheerio.load(html);
         let logoUrl = null;
 
-        // --- TIER 1: METADATA (Preferred: High Res, Square) ---
         const metaSelectors = [
             'link[rel="apple-touch-icon"]',
             'meta[property="og:image"]',
@@ -67,53 +70,111 @@ async function extractLogoUrl(websiteUrl) {
 
         for (const selector of metaSelectors) {
             const val = $(selector).attr('href') || $(selector).attr('content');
-            if (val && !val.endsWith('.ico')) { 
+            if (val && !val.endsWith('.ico')) {
                 logoUrl = resolveUrl(finalUrl, val);
-                if (logoUrl) return logoUrl; 
+                if (logoUrl) return logoUrl;
             }
         }
 
-        // --- TIER 2: DOM HEURISTICS (Fallback: Wide, Transparent) ---
-        
-        // 1. Look for obvious class names
         $('img').each((i, el) => {
             const src = $(el).attr('src');
             const className = $(el).attr('class') || '';
             const idName = $(el).attr('id') || '';
             const altText = $(el).attr('alt') || '';
-            
+
             if (src && (
-                className.toLowerCase().includes('logo') || 
+                className.toLowerCase().includes('logo') ||
                 idName.toLowerCase().includes('logo') ||
                 altText.toLowerCase().includes('logo') ||
                 src.toLowerCase().includes('logo')
             )) {
                 const resolved = resolveUrl(finalUrl, src);
-                // Filter out tiny icons or .ico files
                 if (resolved && !resolved.endsWith('.ico')) {
                     logoUrl = resolved;
-                    return false; // Break Cheerio loop
+                    return false;
                 }
             }
         });
 
         if (logoUrl) return logoUrl;
 
-        // 2. Look for image inside Home Link
         const homeLinkImg = $('a[href="/"] img').first();
         const src = homeLinkImg.attr('src');
         if (src) {
-             logoUrl = resolveUrl(finalUrl, src);
+            logoUrl = resolveUrl(finalUrl, src);
         }
 
         return logoUrl;
 
     } catch (error) {
-        // Log error only if it's NOT a standard connection error (helps debug logic bugs)
-        if (!error.message.includes('timeout') && !error.message.includes('code 404')) {
-            // console.error(`Logic Error on ${websiteUrl}: ${error.message}`);
-        }
         return null;
+    }
+}
+
+/**
+ * METHOD 2: PUPPETEER EXTRACTOR (Fallback)
+ * Slower, heavy, but executes JS and handles dynamic content.
+ */
+async function extractLogoUrlPuppeteer(websiteUrl, browser) {
+    let page = null;
+    try {
+        page = await browser.newPage();
+
+        // Block resources to speed up loading (we only need HTML/Structure, maybe images)
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            if (['font', 'stylesheet', 'media'].includes(req.resourceType())) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
+
+        // Navigate
+        await page.goto(websiteUrl, { waitUntil: 'networkidle2', timeout: 15000 });
+
+        // Evaluate in browser context (handles computed styles and JS-injected nodes)
+        const logoUrl = await page.evaluate(() => {
+            // Helper to check string for "logo"
+            const isLogo = (str) => str && str.toLowerCase().includes('logo');
+
+            // 1. Check Metadata
+            const ogImage = document.querySelector('meta[property="og:image"]');
+            if (ogImage && ogImage.content) return ogImage.content;
+
+            const appleIcon = document.querySelector('link[rel="apple-touch-icon"]');
+            if (appleIcon && appleIcon.href) return appleIcon.href;
+
+            // 2. Check Images in DOM
+            const imgs = Array.from(document.querySelectorAll('img'));
+            for (const img of imgs) {
+                if (
+                    isLogo(img.className) ||
+                    isLogo(img.id) ||
+                    isLogo(img.alt) ||
+                    isLogo(img.src)
+                ) {
+                    // Check if visible
+                    if (img.width > 20 && !img.src.endsWith('.ico')) {
+                        return img.src;
+                    }
+                }
+            }
+
+            // 3. Check Header for first image
+            const headerImg = document.querySelector('header img, .navbar img, a[href="/"] img');
+            if (headerImg && headerImg.src) return headerImg.src;
+
+            return null;
+        });
+
+        return logoUrl;
+
+    } catch (error) {
+        // console.error(`Puppeteer Error on ${websiteUrl}:`, error.message);
+        return null;
+    } finally {
+        if (page) await page.close();
     }
 }
 
@@ -123,19 +184,19 @@ async function extractLogoUrl(websiteUrl) {
 async function generateImageHash(imageUrl) {
     try {
         const response = await client.get(imageUrl, { responseType: 'arraybuffer' });
-        
+
         const contentType = response.headers['content-type'];
         if (contentType && !contentType.startsWith('image/')) return null;
-        if (response.data.length < 1000) return null; // Ignore < 1KB
+        if (response.data.length < 1000) return null;
 
         const buffer = Buffer.from(response.data);
 
         const pixels = await sharp(buffer)
-            .resize({ height: 64 }) // 1. Normalize height
-            .ensureAlpha()          // 2. Ensure alpha channel exists before flattening
-            .flatten({ background: '#ffffff' }) // 3. White background
-            .resize(9, 8, { fit: 'fill' })      // 4. Hash resize
-            .normalize() 
+            .resize({ height: 64 })
+            .ensureAlpha()
+            .flatten({ background: '#808080' })
+            .resize(9, 8, { fit: 'fill' })
+            .normalize()
             .grayscale()
             .raw()
             .toBuffer();
@@ -159,12 +220,33 @@ async function generateImageHash(imageUrl) {
 /**
  * WORKER: Processes a single site
  */
-async function processSingleSite(site) {
-    const logoUrl = await extractLogoUrl(site);
-    if (!logoUrl) return null;
+async function processSingleSite(site, browser) {
+    // 1. Try Fast Axios
+    let logoUrl = await extractLogoUrlAxios(site);
+    let usedPuppeteer = false;
+    // 2. If Failed, Try Heavy Puppeteer
+    if (!logoUrl) {
+        usedPuppeteer = true;
+        // console.log(`[Retry] Switching to Puppeteer for: ${site}`);
+        logoUrl = await extractLogoUrlPuppeteer(site, browser);
+    }
+
+    if (!logoUrl) {
+        stats.trackFailNoLogo();
+        return null;
+    }
 
     const hash = await generateImageHash(logoUrl);
-    if (!hash) return null;
+    if (!hash) {
+        stats.trackFailDownload();
+        return null;
+    }
+
+    const method = usedPuppeteer
+        ? 'Tier 2: Puppeteer Fallback'
+        : 'Tier 1: Fast Axios';
+
+    stats.trackSuccess(method);
 
     return { site, logoUrl, hash };
 }
@@ -182,7 +264,14 @@ function calculateHammingDistance(hash1, hash2) {
 
 // --- MAIN EXECUTION ---
 (async () => {
-    console.log("🚀 Starting Parallel Logo Grouping Engine...");
+    console.log("🚀 Starting Logo Grouping Engine...");
+
+    // Initialize Puppeteer Browser ONCE (Global Instance)
+    // We use --no-sandbox for better compatibility in varied environments
+    const browser = await puppeteer.launch({
+        headless: "new",
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    });
 
     let WEBSITES;
     try {
@@ -192,13 +281,16 @@ function calculateHammingDistance(hash1, hash2) {
             .map(line => line.trim())
             .filter(line => line.length > 0)
             .map(site => site.startsWith("http") ? site : "https://" + site);
-        
-        // WEBSITES = WEBSITES.slice(0, 50); // Comment this out for full run
+
+        WEBSITES = WEBSITES.slice(0, 100);
         console.log(`📋 Loaded ${WEBSITES.length} websites.`);
     } catch (e) {
         console.error("Error reading sites.csv:", e.message);
+        await browser.close();
         process.exit(1);
     }
+
+    stats.init(WEBSITES.length);
 
     // Parallel Processing
     async function processWithConcurrency(items, limit, fn) {
@@ -218,16 +310,21 @@ function calculateHammingDistance(hash1, hash2) {
 
     let processedCount = 0;
     console.log(`⚡ Processing with concurrency: ${CONCURRENCY_LIMIT}`);
-    
+
+    // Pass the browser instance into the worker
     const rawResults = await processWithConcurrency(WEBSITES, CONCURRENCY_LIMIT, async (site) => {
-        const res = await processSingleSite(site);
+        const res = await processSingleSite(site, browser);
         processedCount++;
-        if (processedCount % 50 === 0) process.stdout.write(`\r[${processedCount}/${WEBSITES.length}] `);
+        if (processedCount % 10 === 0) process.stdout.write(`\r[${processedCount}/${WEBSITES.length}] `);
         return res;
     });
 
+    console.log("\n🛑 Closing Browser...");
+    await browser.close();
+    stats.generateReport()
+
     const successfulResults = rawResults.filter(r => r !== null);
-    console.log(`\n✅ Extraction complete. Found ${successfulResults.length} logos.`);
+    console.log(`✅ Extraction complete. Found ${successfulResults.length} logos.`);
 
     // Grouping
     console.log("📦 Grouping results...");
