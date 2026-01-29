@@ -1,6 +1,4 @@
 # Logo Extract & Grouping
-[![Ask DeepWiki](https://devin.ai/assets/askdeepwiki.png)](https://deepwiki.com/andreilazu/logo_extract/tree/main)
-
 This repository contains a Node.js tool designed to crawl a list of websites, extract their logos, and group them based on visual similarity. It uses perceptual hashing to identify sites that share the same logo, even if the files are different. The primary output is a YAML file containing the grouped sites and a dynamically generated statistical report in the README.
 
 ## How It Works
@@ -64,6 +62,8 @@ node debug.js
 
 # Analyze the first 20 failed sites
 node debug.js 20
+
+
 # 📊 Logo Grouping Statistics
 
 ## 🎯 Overview
