@@ -62,9 +62,9 @@ node debug.js
 
 # Analyze the first 20 failed sites
 node debug.js 20
+```
 
-
-# 📊 Logo Grouping Statistics
+### 📊 Logo Grouping Statistics
 
 ## 🎯 Overview
 
