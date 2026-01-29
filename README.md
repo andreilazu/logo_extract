@@ -14,7 +14,7 @@ The engine follows a multi-step process to efficiently analyze and group thousan
 5.  **Grouping**: The script compares the hashes of all successful extractions using the Hamming distance. Logos with a hash distance below a defined similarity threshold are placed into the same group.
 6.  **Output**: The results are saved into two main files:
     *   `groups.yaml`: Contains a detailed list of all groups, including the site URL, logo URL, and perceptual hash for each member of the group.
-    *   `README.md`: A statistical report is generated and replaces the main README file, providing an overview of the latest run.
+    *   `stats.json`: A statistical report is generated, providing an overview of the latest run.
 
 ## Repository Structure
 
