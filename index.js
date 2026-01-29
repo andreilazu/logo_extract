@@ -6,7 +6,7 @@ const fs = require('fs');
 const yaml = require('js-yaml');
 
 // --- CONFIGURATION ---
-const CONCURRENCY_LIMIT = 20; // Number of parallel requests (Don't go too high or you'll get blocked)
+const CONCURRENCY_LIMIT = 20; 
 const SIMILARITY_THRESHOLD = 8;
 const TIMEOUT_MS = 10000;
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36';
@@ -20,7 +20,7 @@ const httpsAgent = new https.Agent({
 const client = axios.create({
     timeout: TIMEOUT_MS,
     httpsAgent: httpsAgent,
-    maxRedirects: 3, // Lowered to save time
+    maxRedirects: 3,
     headers: {
         'User-Agent': USER_AGENT,
         'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
@@ -30,10 +30,15 @@ const client = axios.create({
 });
 
 /**
- * UTILITY: Resolve Relative URLs
+ * UTILITY: Resolve Relative URLs (THIS WAS MISSING)
  */
 function resolveUrl(baseUrl, relativeUrl) {
+    if (!relativeUrl) return null;
     try {
+        if (relativeUrl.startsWith('data:')) return null; // Skip base64 for now to keep it simple
+        if (relativeUrl.startsWith('//')) {
+            return 'https:' + relativeUrl;
+        }
         return new URL(relativeUrl, baseUrl).href;
     } catch (e) {
         return null;
@@ -41,7 +46,7 @@ function resolveUrl(baseUrl, relativeUrl) {
 }
 
 /**
- * STEP 1: EXTRACTOR
+ * STEP 1: EXTRACTOR (Tier 1 + Tier 2)
  */
 async function extractLogoUrl(websiteUrl) {
     try {
@@ -62,14 +67,13 @@ async function extractLogoUrl(websiteUrl) {
 
         for (const selector of metaSelectors) {
             const val = $(selector).attr('href') || $(selector).attr('content');
-            if (val && !val.endsWith('.ico')) { // Skip .ico in Tier 1 if possible
+            if (val && !val.endsWith('.ico')) { 
                 logoUrl = resolveUrl(finalUrl, val);
-                if (logoUrl) return logoUrl; // RETURN IMMEDIATELY if found
+                if (logoUrl) return logoUrl; 
             }
         }
 
         // --- TIER 2: DOM HEURISTICS (Fallback: Wide, Transparent) ---
-        // Only run if Tier 1 failed. This is fast (regex/parsing), no network hit.
         
         // 1. Look for obvious class names
         $('img').each((i, el) => {
@@ -78,27 +82,25 @@ async function extractLogoUrl(websiteUrl) {
             const idName = $(el).attr('id') || '';
             const altText = $(el).attr('alt') || '';
             
-            // Score the image based on keywords
             if (src && (
                 className.toLowerCase().includes('logo') || 
                 idName.toLowerCase().includes('logo') ||
                 altText.toLowerCase().includes('logo') ||
                 src.toLowerCase().includes('logo')
             )) {
-                // Ignore SVGs if you want strictly raster, but Sharp handles them.
-                // Ignore tiny tracking pixels later in processing.
                 const resolved = resolveUrl(finalUrl, src);
+                // Filter out tiny icons or .ico files
                 if (resolved && !resolved.endsWith('.ico')) {
                     logoUrl = resolved;
-                    return false; // Break loop
+                    return false; // Break Cheerio loop
                 }
             }
         });
 
         if (logoUrl) return logoUrl;
 
-        // 2. Look for image inside Home Link (Standard pattern)
-        const homeLinkImg = $('a[href="/"] img, a[href="' + finalUrl + '"] img').first();
+        // 2. Look for image inside Home Link
+        const homeLinkImg = $('a[href="/"] img').first();
         const src = homeLinkImg.attr('src');
         if (src) {
              logoUrl = resolveUrl(finalUrl, src);
@@ -107,6 +109,10 @@ async function extractLogoUrl(websiteUrl) {
         return logoUrl;
 
     } catch (error) {
+        // Log error only if it's NOT a standard connection error (helps debug logic bugs)
+        if (!error.message.includes('timeout') && !error.message.includes('code 404')) {
+            // console.error(`Logic Error on ${websiteUrl}: ${error.message}`);
+        }
         return null;
     }
 }
@@ -117,15 +123,19 @@ async function extractLogoUrl(websiteUrl) {
 async function generateImageHash(imageUrl) {
     try {
         const response = await client.get(imageUrl, { responseType: 'arraybuffer' });
-        const contentType = response.headers['content-type'];
         
+        const contentType = response.headers['content-type'];
         if (contentType && !contentType.startsWith('image/')) return null;
+        if (response.data.length < 1000) return null; // Ignore < 1KB
 
         const buffer = Buffer.from(response.data);
 
         const pixels = await sharp(buffer)
-            .resize(9, 8, { fit: 'fill' })
-            .normalize()
+            .resize({ height: 64 }) // 1. Normalize height
+            .ensureAlpha()          // 2. Ensure alpha channel exists before flattening
+            .flatten({ background: '#ffffff' }) // 3. White background
+            .resize(9, 8, { fit: 'fill' })      // 4. Hash resize
+            .normalize() 
             .grayscale()
             .raw()
             .toBuffer();
@@ -145,9 +155,9 @@ async function generateImageHash(imageUrl) {
     }
 }
 
+
 /**
  * WORKER: Processes a single site
- * Returns object { site, logoUrl, hash } or null
  */
 async function processSingleSite(site) {
     const logoUrl = await extractLogoUrl(site);
@@ -174,7 +184,6 @@ function calculateHammingDistance(hash1, hash2) {
 (async () => {
     console.log("🚀 Starting Parallel Logo Grouping Engine...");
 
-    // 1. Load Data
     let WEBSITES;
     try {
         const csv = fs.readFileSync("sites.csv", "utf8");
@@ -184,71 +193,22 @@ function calculateHammingDistance(hash1, hash2) {
             .filter(line => line.length > 0)
             .map(site => site.startsWith("http") ? site : "https://" + site);
         
-        // Remove .slice() when ready for full run
-        WEBSITES = WEBSITES.slice(0, 50); 
+        // WEBSITES = WEBSITES.slice(0, 50); // Comment this out for full run
         console.log(`📋 Loaded ${WEBSITES.length} websites.`);
     } catch (e) {
         console.error("Error reading sites.csv:", e.message);
         process.exit(1);
     }
 
-    // 2. Parallel Processing (The "Worker Pool" Pattern)
-    const results = [];
-    let processedCount = 0;
-    
-    // This helper function manages the concurrency
-    async function runBatch() {
-        const promises = [];
-        
-        for (const site of WEBSITES) {
-            // Create a promise for the current item
-            const p = processSingleSite(site).then(result => {
-                processedCount++;
-                if (processedCount % 10 === 0) {
-                    process.stdout.write(`\rProgress: ${processedCount}/${WEBSITES.length} sites...`);
-                }
-                if (result) results.push(result);
-            });
-
-            promises.push(p);
-
-            // If we hit the limit, wait for *one* of them to finish before adding more
-            if (promises.length >= CONCURRENCY_LIMIT) {
-                await Promise.race(promises);
-                // Clean up finished promises to keep array small
-                // (Note: In a perfect world we'd remove the specific finished one, 
-                // but strictly waiting for race is enough to throttle).
-                // For cleaner memory management, we can use a Set, but this works for 4000.
-                const index = promises.findIndex(p => util.inspect(p).includes('pending') === false); 
-                // Simple cleanup: just wait for some space
-                 while (promises.length >= CONCURRENCY_LIMIT) {
-                     // Wait for one to finish, then remove it
-                     await Promise.race(promises);
-                     // Filter out fulfilled promises
-                     // Since standard Promises don't expose state easily, 
-                     // we usually use a wrapper or a library like 'p-limit'.
-                     // For this demo, let's use a simpler "Chunking" strategy 
-                     // if you want zero-dependencies, OR simply wait for the batch.
-                 }
-            }
-        }
-        // Wait for remainder
-        await Promise.all(promises);
-    }
-
-    // ACTUALLY, let's use the cleanest native method for concurrency:
-    // "Map with Iterator"
+    // Parallel Processing
     async function processWithConcurrency(items, limit, fn) {
         const results = [];
         const executing = [];
-        
         for (const item of items) {
             const p = Promise.resolve().then(() => fn(item));
             results.push(p);
-            
             const e = p.then(() => executing.splice(executing.indexOf(e), 1));
             executing.push(e);
-            
             if (executing.length >= limit) {
                 await Promise.race(executing);
             }
@@ -256,8 +216,9 @@ function calculateHammingDistance(hash1, hash2) {
         return Promise.all(results);
     }
 
-    // Run the robust parallel processor
+    let processedCount = 0;
     console.log(`⚡ Processing with concurrency: ${CONCURRENCY_LIMIT}`);
+    
     const rawResults = await processWithConcurrency(WEBSITES, CONCURRENCY_LIMIT, async (site) => {
         const res = await processSingleSite(site);
         processedCount++;
@@ -265,11 +226,10 @@ function calculateHammingDistance(hash1, hash2) {
         return res;
     });
 
-    // Filter out nulls (failed sites)
     const successfulResults = rawResults.filter(r => r !== null);
     console.log(`\n✅ Extraction complete. Found ${successfulResults.length} logos.`);
 
-    // 3. Grouping Logic
+    // Grouping
     console.log("📦 Grouping results...");
     const groups = [];
     const used = new Set();
@@ -286,9 +246,7 @@ function calculateHammingDistance(hash1, hash2) {
 
         for (let j = i + 1; j < successfulResults.length; j++) {
             if (used.has(j)) continue;
-
             const dist = calculateHammingDistance(successfulResults[i].hash, successfulResults[j].hash);
-
             if (dist <= SIMILARITY_THRESHOLD) {
                 currentGroup.push({
                     site: successfulResults[j].site,
@@ -301,11 +259,9 @@ function calculateHammingDistance(hash1, hash2) {
         groups.push(currentGroup);
     }
 
-    // 4. Output
     console.log(`💾 Saving to groups.yaml... (Total Groups: ${groups.length})`);
     const yamlStr = yaml.dump(groups);
     fs.writeFileSync('groups.yaml', yamlStr, 'utf8');
     console.log("Done.");
-
 
 })();
