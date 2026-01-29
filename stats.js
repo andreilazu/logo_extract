@@ -118,10 +118,6 @@ function generateAndSaveStats(groups, totalSites) {
     const analysisResults = generateStats(groups, totalSites, successfulResults);
     const markdown = generateMarkdown(analysisResults);
     
-    // Save markdown file
-    fs.writeFileSync('STATS.md', markdown, 'utf8');
-    console.log('✅ Statistics saved to STATS.md');
-    
     // Also save JSON for programmatic access
     const jsonStats = {
         generated: new Date().toISOString(),
@@ -149,5 +145,6 @@ function generateAndSaveStats(groups, totalSites) {
     
     return analysisResults;
 }
+
 
 module.exports = { generateAndSaveStats };
