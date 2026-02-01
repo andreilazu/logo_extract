@@ -16,7 +16,7 @@ flowchart LR
     B[Successful Extractions<br/>3415]
     C[Failed Extractions<br/>968]
     D[Total Groups<br/>1153]
-    E[Duplicate Groups<br/>379]
+    E[Groups with Duplicates<br/>379]
     F[Unique Logos<br/>774]
 
     A --> B
