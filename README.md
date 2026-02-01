@@ -9,46 +9,6 @@ pie title Logo Dataset Breakdown
     "Unique Logos (774)" : 774
     "Groups with Duplicates (379)" : 379
 ```
-## 📈 Group Size Distribution
-
-```
-  1 sites │██████████████████████████████████████████████████ 774
-  2 sites │███████████ 161
-  3 sites │████ 57
-  4 sites │███ 41
-  5 sites │██ 21
-  6 sites │██ 19
-  7 sites │█ 14
-  8 sites │█ 14
-  9 sites │█ 7
- 10 sites │█ 2
- 11 sites │█ 3
- 12 sites │█ 2
- 14 sites │█ 1
- 15 sites │█ 6
- 16 sites │█ 1
- 17 sites │█ 4
- 19 sites │█ 3
- 20 sites │█ 3
- 21 sites │█ 1
- 22 sites │█ 2
- 23 sites │█ 1
- 24 sites │█ 2
- 26 sites │█ 1
- 27 sites │█ 1
- 29 sites │█ 1
- 30 sites │█ 2
- 31 sites │█ 1
- 39 sites │█ 1
- 45 sites │█ 1
- 57 sites │█ 1
- 78 sites │█ 1
- 81 sites │█ 1
-119 sites │█ 1
-185 sites │█ 1
-197 sites │█ 1
-
-```
 
 ```mermaid
 xychart-beta
