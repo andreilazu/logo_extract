@@ -8,7 +8,7 @@ pie title Logo Extraction Results
 ```mermaid
 pie title Logo Dataset Breakdown
     "Unique Logos (774)" : 774
-    "Groups with Duplicates (379)" : 379
+    "Groups with Similarities (379)" : 379
 ```
 ```mermaid
 flowchart LR
@@ -16,7 +16,7 @@ flowchart LR
     B[Successful Extractions<br/>3415]
     C[Failed Extractions<br/>968]
     D[Total Groups<br/>1153]
-    E[Groups with Duplicates<br/>379]
+    E[Groups with Similarities<br/>379]
     F[Unique Logos<br/>774]
 
     A --> B
