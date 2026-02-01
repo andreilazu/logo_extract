@@ -4,20 +4,12 @@ pie title Logo Extraction Results
     "Successful Extractions (3415)" : 3415
     "Failed Extractions (968)" : 968
 ```
+
 ```mermaid
 pie title Logo Dataset Breakdown
     "Unique Logos (774)" : 774
     "Groups with Duplicates (379)" : 379
 ```
-
-```mermaid
-xychart-beta
-    title "Top Duplicate Logo Groups"
-    x-axis "Group" ["Mazda Dealers","AAMCO","Toyota Dealers","Veolia","Baker Tilly"]
-    y-axis "Sites" 0 --> 220
-    bar [197,185,119,81,78,57]
-```
-
 ```mermaid
 flowchart LR
     A[Total Sites<br/>4383]
@@ -32,6 +24,14 @@ flowchart LR
     B --> D
     D --> E
     D --> F
+```
+
+```mermaid
+xychart-beta
+    title "Top Duplicate Logo Groups"
+    x-axis "Group" ["Mazda Dealers","AAMCO","Toyota Dealers","Veolia","Baker Tilly"]
+    y-axis "Sites" 0 --> 220
+    bar [197,185,119,81,78,57]
 ```
 
 
